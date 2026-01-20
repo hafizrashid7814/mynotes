@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:mynotes/views/register_view.dart';
+import 'dart:developer' as devtools show log;
 
 class LoginView extends StatefulWidget {
   const LoginView({super.key});
@@ -88,7 +89,13 @@ class _LoginViewState extends State<LoginView> {
                             email: email,
                             password: password,
                           );
-                      print('Login successful: ${userCredential.user?.email}');
+
+                      Navigator.of(
+                        context,
+                      ).pushNamedAndRemoveUntil('/notes', (route) => false);
+                      devtools.log(
+                        'Login successful: ${userCredential.user?.email}',
+                      );
 
                       // Clear fields after successful login
                       _email.clear();
