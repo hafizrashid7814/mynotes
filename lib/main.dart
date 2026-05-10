@@ -1,25 +1,33 @@
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:mynotes/constants/routes.dart' show createOrUpdatNoteRoute;
+import 'package:mynotes/helper/loading/loading_screen.dart';
+import 'package:mynotes/services/auth/bloc/auth_bloc.dart';
+import 'package:mynotes/services/auth/bloc/auth_event.dart';
+import 'package:mynotes/services/auth/bloc/auth_state.dart';
+import 'package:mynotes/services/auth/firebase_auth_provider.dart';
+import 'package:mynotes/views/forgot_password_view.dart';
+import 'package:mynotes/views/notes/create_update_note_view.dart'
+    show CreateUpdateNoteView;
+import 'package:mynotes/views/notes/notes_view.dart' show NotesView;
 import 'package:mynotes/views/register_view.dart';
-import 'dart:async';
-import 'firebase_options.dart';
-import 'views/login_view.dart'; // <--- add this import
-import 'dart:developer' as devtools show log;
+import 'package:mynotes/views/launch_screen_view.dart';
 
-void log() {}
+import 'dart:async';
+import 'views/login_view.dart';
+
+import 'package:mynotes/services/auth/auth_service.dart';
+
+late AuthService _authService;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   try {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
-  } on UnsupportedError catch (e) {
-    debugPrint('Firebase not configured for this platform: $e');
+    _authService = AuthService.firebase();
+    await _authService.initialize();
   } catch (e) {
-    debugPrint('Firebase initialization error: $e');
+    debugPrint('Auth service initialization error: $e');
   }
   runApp(const MyApp());
 }
@@ -31,83 +39,51 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Flutter Demo',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
       ),
-      home: const HomePage(),
+      home: BlocProvider<AuthBloc>(
+        create: (context) => AuthBloc(FirebaseAuthProvider()),
+        child: const HomePage(),
+      ),
       routes: {
-        '/login': (context) => const LoginView(),
-        '/register': (context) => const RegisterView(),
-        '/notes': (context) => const NotesView(),
+        createOrUpdatNoteRoute: (context) => const CreateUpdateNoteView(),
       },
     );
   }
 }
 
-class HomePage extends StatefulWidget {
+class HomePage extends StatelessWidget {
   const HomePage({super.key});
 
   @override
-  State<HomePage> createState() => _HomePageState();
-}
-
-class _HomePageState extends State<HomePage> {
-  @override
   Widget build(BuildContext context) {
-    return StreamBuilder<User?>(
-      stream: FirebaseAuth.instance.authStateChanges(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
+    context.read<AuthBloc>().add(const AuthEventInitialize());
+    return BlocConsumer<AuthBloc, AuthState>(
+      listener: (context, state) {
+        if (state.isLoading) {
+          LoadingScreen().show(
+            context: context,
+            text: state.loadingText ?? 'Please wait a moment',
           );
-        }
-
-        final user = snapshot.data;
-
-        if (user == null) {
-          return const LoginView();
-        } else if (!user.emailVerified) {
-          return const VerifyEmailView();
         } else {
-          return Scaffold(
-            appBar: AppBar(
-              title: const Text('Home'),
-              actions: [
-                PopupMenuButton<MenuAction>(
-                  onSelected: (value) async {
-                    switch (value) {
-                      case MenuAction.logout:
-                        final confirmed = await showLogoutDialog(context);
-                        if (confirmed) {
-                          await FirebaseAuth.instance.signOut();
-                        }
-                        break;
-                    }
-                  },
-                  itemBuilder: (context) {
-                    return const [
-                      PopupMenuItem<MenuAction>(
-                        value: MenuAction.logout,
-                        child: Text('Logout'),
-                      ),
-                    ];
-                  },
-                ),
-              ],
-            ),
-            body: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Text('User is logged in and email is verified'),
-                  ],
-                ),
-              ),
-            ),
-          );
+          LoadingScreen().hide();
+        }
+      },
+      builder: (context, state) {
+        if (state is AuthStateLoggedIn) {
+          return const NotesView();
+        } else if (state is AuthStateNeedsVerification) {
+          return const VerifyEmailView();
+        } else if (state is AuthStateLoggedOut) {
+          return const LoginView();
+        } else if (state is AuthStateForgotPassword) {
+          return const ForgotPasswordView();
+        } else if (state is AuthStateRegistering) {
+          return const RegisterView();
+        } else {
+          return const LaunchScreenView();
         }
       },
     );
@@ -144,10 +120,7 @@ class _VerifyEmailViewState extends State<VerifyEmailView> {
       }
 
       try {
-        final user = FirebaseAuth.instance.currentUser;
-        if (user != null) {
-          await user.reload();
-        }
+        await _authService.initialize();
       } catch (e) {
         debugPrint('Error reloading user: $e');
       }
@@ -169,51 +142,40 @@ class _VerifyEmailViewState extends State<VerifyEmailView> {
             const SizedBox(height: 16),
             ElevatedButton(
               onPressed: () async {
+                final messenger = ScaffoldMessenger.of(context);
+
                 try {
-                  final user = FirebaseAuth.instance.currentUser;
+                  final user = _authService.currentUser;
                   if (user == null) {
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('No user found. Please log in again.'),
-                          duration: Duration(seconds: 3),
-                        ),
-                      );
-                    }
+                    messenger.showSnackBar(
+                      const SnackBar(
+                        content: Text('No user found. Please log in again.'),
+                        duration: Duration(seconds: 3),
+                      ),
+                    );
                     return;
                   }
 
-                  await user.sendEmailVerification();
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'Verification email sent. Check your inbox and spam folder.',
-                        ),
-                        duration: Duration(seconds: 4),
+                  await _authService.sendEmailVerification();
+                  if (!mounted) return;
+
+                  messenger.showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Verification email sent. Check your inbox and spam folder.',
                       ),
-                    );
-                  }
-                } on FirebaseAuthException catch (e) {
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Error sending email: ${e.message}'),
-                        duration: const Duration(seconds: 4),
-                      ),
-                    );
-                  }
-                  debugPrint('Email verification error: ${e.message}');
+                      duration: Duration(seconds: 4),
+                    ),
+                  );
                 } catch (e) {
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Error: $e'),
-                        duration: const Duration(seconds: 4),
-                      ),
-                    );
-                  }
-                  debugPrint('Unexpected error: $e');
+                  if (!mounted) return;
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text('Error sending email: $e'),
+                      duration: const Duration(seconds: 4),
+                    ),
+                  );
+                  debugPrint('Email verification error: $e');
                 }
               },
               child: const Text('Resend Verification Email'),
@@ -221,57 +183,13 @@ class _VerifyEmailViewState extends State<VerifyEmailView> {
             const SizedBox(height: 16),
             TextButton(
               onPressed: () async {
-                await FirebaseAuth.instance.signOut();
+                await _authService.logOut();
               },
               child: const Text('Back to Login'),
             ),
           ],
         ),
       ),
-    );
-  }
-}
-
-enum MenuAction { logout }
-
-class NotesView extends StatefulWidget {
-  const NotesView({super.key});
-
-  @override
-  State<NotesView> createState() => _NotesViewState();
-}
-
-class _NotesViewState extends State<NotesView> {
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Notes'),
-        actions: [
-          PopupMenuButton<MenuAction>(
-            onSelected: (value) async {
-              devtools.log(value.toString());
-              switch (value) {
-                case MenuAction.logout:
-                  final confirmed = await showLogoutDialog(context);
-                  if (confirmed) {
-                    await FirebaseAuth.instance.signOut();
-                  }
-                  break;
-              }
-            },
-            itemBuilder: (context) {
-              return const [
-                PopupMenuItem<MenuAction>(
-                  value: MenuAction.logout,
-                  child: Text('Logout'),
-                ),
-              ];
-            },
-          ),
-        ],
-      ),
-      body: const Center(child: Text('This is the Notes View')),
     );
   }
 }

@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:mynotes/views/register_view.dart';
-import 'dart:developer' as devtools show log;
+
+import 'package:mynotes/services/auth/auth_exceptions.dart';
+import 'package:mynotes/services/auth/bloc/auth_bloc.dart';
+import 'package:mynotes/services/auth/bloc/auth_event.dart';
+import 'package:mynotes/services/auth/bloc/auth_state.dart';
+import 'package:mynotes/utilities/dialogs/error_dialog.dart';
+
+import 'package:flutter_bloc/flutter_bloc.dart';
 
 class LoginView extends StatefulWidget {
   const LoginView({super.key});
@@ -30,99 +35,91 @@ class _LoginViewState extends State<LoginView> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Login')),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Center(
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  'Welcome Back',
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 32),
-                TextField(
-                  controller: _email,
-                  enableSuggestions: false,
-                  autocorrect: false,
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: const InputDecoration(
-                    hintText: 'Enter your email',
-                    border: OutlineInputBorder(),
+    return BlocListener<AuthBloc, AuthState>(
+      listener: (context, state) async {
+        if (state is AuthStateLoggedOut &&
+            state.exception != null &&
+            state.exception is UserNotFoundAuthException) {
+          await showErrorDialog(
+            context,
+            'Cannot find a user with the entered credentials!',
+          );
+        } else if (state is AuthStateLoggedOut &&
+            state.exception != null &&
+            state.exception is WrongPasswordAuthException) {
+          await showErrorDialog(context, 'wrong credentials');
+        } else if (state is AuthStateLoggedOut &&
+            state.exception != null &&
+            state.exception is GenericAuthException) {
+          await showErrorDialog(context, 'Authentication error');
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(title: const Text('Login')),
+        body: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Center(
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Please log into your account in order to interact with and create notes!',
+                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                   ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _password,
-                  obscureText: true,
-                  enableSuggestions: false,
-                  autocorrect: false,
-                  decoration: const InputDecoration(
-                    hintText: 'Enter your password',
-                    border: OutlineInputBorder(),
+                  const SizedBox(height: 32),
+                  TextField(
+                    controller: _email,
+                    enableSuggestions: false,
+                    autocorrect: false,
+                    keyboardType: TextInputType.emailAddress,
+                    decoration: const InputDecoration(
+                      hintText: 'Enter your email',
+                      border: OutlineInputBorder(),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 24),
-                ElevatedButton(
-                  onPressed: () async {
-                    try {
-                      final email = _email.text.trim();
-                      final password = _password.text;
-
-                      if (email.isEmpty || password.isEmpty) {
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Please fill in all fields'),
-                              duration: Duration(seconds: 2),
-                            ),
-                          );
-                        }
-                        return;
-                      }
-
-                      final userCredential = await FirebaseAuth.instance
-                          .signInWithEmailAndPassword(
-                            email: email,
-                            password: password,
-                          );
-
-                      Navigator.of(
-                        context,
-                      ).pushNamedAndRemoveUntil('/notes', (route) => false);
-                      devtools.log(
-                        'Login successful: ${userCredential.user?.email}',
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _password,
+                    obscureText: true,
+                    enableSuggestions: false,
+                    autocorrect: false,
+                    decoration: const InputDecoration(
+                      hintText: 'Enter your password',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  ElevatedButton(
+                    onPressed: () async {
+                      context.read<AuthBloc>().add(
+                        AuthEventLogIn(
+                          email: _email.text,
+                          password: _password.text,
+                        ),
                       );
-
-                      // Clear fields after successful login
-                      _email.clear();
-                      _password.clear();
-                    } on FirebaseAuthException catch (e) {
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Login error: ${e.message}'),
-                            duration: const Duration(seconds: 3),
-                          ),
-                        );
-                      }
-                    }
-                  },
-                  child: const Text('Login'),
-                ),
-                const SizedBox(height: 12),
-                TextButton(
-                  onPressed: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const RegisterView()),
-                    );
-                  },
-                  child: const Text('Don\'t have an account? Register'),
-                ),
-              ],
+                    },
+                    child: const Text('Login'),
+                  ),
+                  const SizedBox(height: 12),
+                  TextButton(
+                    onPressed: () {
+                      context.read<AuthBloc>().add(
+                        const AuthEventShouldRegister(),
+                      );
+                    },
+                    child: const Text('Don\'t have an account? Register'),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      context.read<AuthBloc>().add(
+                        const AuthEventForgotPassword(email: 'email'),
+                      );
+                    },
+                    child: const Text('I forgot my password'),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

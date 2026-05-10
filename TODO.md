@@ -1,0 +1,2 @@
+- [ ] Edit test/auth_test.dart to fix password in badPasswordUser test, remove duplicate initialize test, and update MockAuthProvider methods.
+- [ ] Run flutter test to verify fixes.
